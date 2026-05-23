@@ -1,0 +1,27 @@
+[package]
+name = "jibjack_trivia"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# ratatui — TUI framework: widgets, layout, drawing to the terminal
+ratatui = "0.28"
+
+# crossterm — terminal control: raw mode, keyboard events, alternate screen
+crossterm = "0.28"
+
+# tokio — async runtime for non-blocking HTTP while the game loop runs
+tokio = { version = "1", features = ["full"] }
+
+# reqwest — HTTP client (fetch trivia questions from the API)
+reqwest = { version = "0.12", features = ["json"] }
+
+# serde — serialize/deserialize Rust structs to/from JSON
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.150"
+
+# rand — shuffle answer options so the correct one isn't always in the same spot
+rand = "0.8"
+
+# dirs — find OS-specific paths for saving high scores
+dirs = "5"

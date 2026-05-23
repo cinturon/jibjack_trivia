@@ -1,0 +1,65 @@
+---
+description: Git-flow branching with Linear tickets — branch from develop on open, merge on close
+alwaysApply: true
+---
+
+# Git-Flow + Linear Tickets
+
+## Branch model
+
+- `main` — production-ready releases
+- `develop` — integration branch; all feature work merges here
+- `feature/*` — one branch per Linear ticket, branched from `develop`
+
+If `develop` does not exist yet, create it from `main` before starting feature work.
+
+## Opening a ticket
+
+When the user starts work on a Linear ticket (e.g. JIB-94):
+
+1. Fetch and checkout `develop`; pull latest if a remote exists
+2. Create a feature branch **from `develop`**
+3. Use Linear's suggested branch name when available (e.g. `jeremybelt/jib-94-create-asciirs-module`), otherwise `feature/jib-XX-short-slug`
+4. Mark the Linear ticket **In Progress**
+5. Do all work on the feature branch — never commit directly to `develop` or `main`
+
+```bash
+git checkout develop
+git pull origin develop   # if remote exists
+git checkout -b jeremybelt/jib-94-create-asciirs-module
+```
+
+## Closing a ticket
+
+When the user finishes a ticket:
+
+1. Run verification (`cargo check`, `cargo clippy`; tests if relevant)
+2. Stage only files for this ticket; commit with the ticket ID in the message
+3. Checkout `develop`, merge the feature branch with `--no-ff`
+4. Delete the local feature branch
+5. Mark the Linear ticket **Done**
+6. Do **not** push unless the user explicitly asks
+
+```bash
+git add <relevant files>
+git commit -m "$(cat <<'EOF'
+JIB-94: Create ascii.rs module
+
+EOF
+)"
+git checkout develop
+git merge --no-ff jeremybelt/jib-94-create-asciirs-module -m "Merge branch 'jeremybelt/jib-94-create-asciirs-module' into develop"
+git branch -d jeremybelt/jib-94-create-asciirs-module
+```
+
+## Commit messages
+
+- Start with the Linear ID: `JIB-94: Short description`
+- One ticket per branch; one focused commit per ticket unless the user asks otherwise
+- Never commit secrets (`.env`, credentials)
+
+## Safety
+
+- Never force-push to `main` or `develop`
+- Never skip hooks unless the user explicitly requests it
+- Ask before amending commits that were already pushed
