@@ -273,11 +273,26 @@ fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn time_fraction_remaining(app: &App) -> f64 {
-    let limit = secs_to_ticks(app.difficulty.time_limit_secs()) as f64;
-    if limit <= 0.0 {
+    let limit_secs = app.difficulty.time_limit_secs() + app.bonus_bank_secs;
+    if limit_secs == 0 {
         return 0.0;
     }
-    (1.0 - app.question_time as f64 / limit).clamp(0.0, 1.0)
+    (app.total_secs_remaining() as f64 / limit_secs as f64).clamp(0.0, 1.0)
+}
+
+fn time_gauge_label(app: &App) -> String {
+    let bank = app.bank_secs_remaining();
+    if app.secs_remaining() > 0 {
+        if bank > 0 {
+            format!("{}s (+{bank}s bank)", app.secs_remaining())
+        } else {
+            format!("{}s left", app.secs_remaining())
+        }
+    } else if bank > 0 {
+        format!("{bank}s bank")
+    } else {
+        "0s".to_string()
+    }
 }
 
 fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
@@ -329,10 +344,7 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
                 .bg(COL_DIM),
         )
         .ratio(time_fraction_remaining(app))
-        .label(format!(
-            "{}s left",
-            (app.difficulty.time_limit_secs()).saturating_sub(app.question_time * MS_PER_TICK / 1000)
-        ));
+        .label(time_gauge_label(app));
     f.render_widget(gauge, chunks[2]);
 
     let answers: Vec<ListItem> = app
@@ -384,6 +396,22 @@ fn draw_answer_reveal(f: &mut Frame, app: &App, area: Rect) {
             format!("Score: {}", app.score),
             Style::default().fg(COL_ACCENT),
         )),
+        Line::from(if app.last_correct && app.time_bonus > 0 {
+            Span::styled(
+                format!("+{} time bonus", app.time_bonus),
+                Style::default().fg(COL_CORRECT),
+            )
+        } else {
+            Span::raw("")
+        }),
+        Line::from(if app.last_correct && app.bank_deposit > 0 {
+            Span::styled(
+                format!("+{}s to time bank", app.bank_deposit),
+                Style::default().fg(COL_ACCENT),
+            )
+        } else {
+            Span::raw("")
+        }),
     ]);
 
     f.render_widget(Clear, popup);
