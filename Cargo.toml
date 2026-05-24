@@ -25,3 +25,7 @@ rand = "0.8"
 
 # dirs — find OS-specific paths for saving high scores
 dirs = "5"
+
+# chrono - for time related functionality
+chrono = "0.4.44"
+html-escape = "0.2.13"
