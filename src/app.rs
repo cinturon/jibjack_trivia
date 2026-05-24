@@ -1,6 +1,7 @@
 use crate::scores::{add_high_score, load_high_scores, HighScore};
 use crate::trivia::{Category, Difficulty, Question, fetch_questions_from_opentdb};
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::widgets::ListState;
 use std::error::Error;
 use tokio::sync::oneshot;
 use crate::ascii;
@@ -39,14 +40,17 @@ pub struct App {
     pub menu_items: &'static [&'static str],
     pub difficulty: Difficulty,
     pub difficulties: &'static [Difficulty],
+    pub difficulty_cursor: usize,
     pub category: Category,
     pub categories: &'static [Category],
+    pub category_list_state: ListState,
+    pub category_cursor: usize,
     pub questions: Vec<Question>,
     pub current_q: usize,
     pub current_question: Option<Question>,
+    pub option_cursor: usize,
     pub score: u32,
     pub correct_count: u32,
-    pub option_cursor: usize,
     pub answered: bool,
     pub last_correct: bool,
     pub question_time: u64,
@@ -74,17 +78,20 @@ impl App {
             menu_items: MENU_ITEMS,
             difficulty: Difficulty::Medium,
             difficulties: Difficulty::all(),
+            difficulty_cursor: 0,
             category: Category::all()[0],
             categories: Category::all(),
+            category_list_state: ListState::default(),
+            category_cursor: 0,
             scores: load_high_scores().unwrap_or_default(),
             name_input: String::new(),
             should_quit: false,
             questions: vec![],
             current_q: 0,
             current_question: None,
+            option_cursor: 0,
             score: 0,
             correct_count: 0,
-            option_cursor: 0,
             answered: false,
             last_correct: false,
             question_time: 0,
@@ -147,6 +154,8 @@ impl App {
     }
 
     pub fn handle_main_menu_key(&mut self, key: KeyEvent) {
+    
+        
         match key.code {
             KeyCode::Char('q') => {
                 self.should_quit = true;
@@ -159,7 +168,8 @@ impl App {
             }
             KeyCode::Enter | KeyCode::Char(' ') => match self.menu_cursor {
                 0 => {
-                    self.option_cursor = 0;
+                    self.category_cursor = 0;
+                    self.category_list_state.select(Some(0));
                     self.screen = Screen::CategorySelect;
                 }
                 1 => self.screen = Screen::HighScores,
@@ -173,14 +183,14 @@ impl App {
         let max = self.categories.len().saturating_sub(1);
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.option_cursor = self.option_cursor.saturating_sub(1);
+                self.category_cursor = self.category_cursor.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.option_cursor = (self.option_cursor + 1).min(max);
+                self.category_cursor = (self.category_cursor + 1).min(max);
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                self.category = self.categories[self.option_cursor];
-                self.option_cursor = 0;
+                self.category = self.categories[self.category_cursor];
+                self.category_cursor = 0;
                 self.screen = Screen::DifficultySelect;
             }
             KeyCode::Esc => {
@@ -196,17 +206,17 @@ impl App {
         let max = self.difficulties.len().saturating_sub(1);
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.option_cursor = self.option_cursor.saturating_sub(1);
+                self.difficulty_cursor = self.difficulty_cursor.saturating_sub(1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.option_cursor = (self.option_cursor + 1).min(max);
+                self.difficulty_cursor = (self.difficulty_cursor + 1).min(max);
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                self.difficulty = self.difficulties[self.option_cursor];
+                self.difficulty = self.difficulties[self.difficulty_cursor];
                 self.start_loading();
             }
             KeyCode::Esc => {
-                self.option_cursor = 0;
+                self.difficulty_cursor = 0;
                 self.screen = Screen::CategorySelect;
             }
             KeyCode::Char('q') => self.should_quit = true,
