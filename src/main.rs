@@ -1,5 +1,6 @@
 mod ascii;
 mod scores;
+mod trivia;
 
 fn main() {
     // Temporary: verify the module loads. Remove when ui.rs draws the splash screen.
