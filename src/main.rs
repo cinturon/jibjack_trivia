@@ -31,7 +31,7 @@ async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<(), Bo
     let mut app = App::new();
 
     loop{
-        terminal.draw(|frame| ui::render(frame, &app))?;
+        terminal.draw(|frame| ui::render(frame, &mut app))?;
 
         // Process input
         if event::poll(Duration::from_millis(50))?

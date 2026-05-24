@@ -28,7 +28,7 @@ fn secs_to_ticks(secs: u64) -> u64 {
 }
 
 /// Draw the current screen from `app` state.
-pub fn render(f: &mut Frame, app: &App) {
+pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     match app.screen {
@@ -162,7 +162,7 @@ fn draw_placeholder(f: &mut Frame, title: &str, area: Rect) {
     f.render_widget(p, area);
 }
 
-fn draw_category_select(f: &mut Frame, app: &App, area: Rect) {
+fn draw_category_select(f: &mut Frame, app: &mut App, area: Rect) {
     let block = styled_block("Choose Category");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -177,10 +177,15 @@ fn draw_category_select(f: &mut Frame, app: &App, area: Rect) {
         .categories
         .iter()
         .enumerate()
-        .map(|(i, cat)| selected_list_item(cat.name, i == app.option_cursor))
+        .map(|(i, cat)| selected_list_item(cat.name, i == app.category_cursor))
         .collect();
 
-    f.render_widget(List::new(items), chunks[0]);
+
+    let list = List::new(items);
+
+    app.category_list_state.select(Some(app.category_cursor));
+    f.render_stateful_widget(list, chunks[0], &mut app.category_list_state);
+
     f.render_widget(
         Paragraph::new(hint_line(&[
             ("↑↓", "Navigate"),
