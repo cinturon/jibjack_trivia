@@ -1,11 +1,10 @@
-use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use html_escape::decode_html_entities;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use html_escape::decode_html_entities;
+use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Difficulty {
     Easy,
     Medium,
@@ -40,9 +39,11 @@ impl Difficulty {
         }
     }
 
-    /// Returns all the difficulties in a vector
-    pub fn all() -> Vec<Difficulty> {
-        vec![Difficulty::Easy, Difficulty::Medium, Difficulty::Hard]
+    /// Returns all difficulties as a static slice (safe to store on `App`).
+    pub fn all() -> &'static [Difficulty] {
+        const DIFFICULTIES: [Difficulty; 3] =
+            [Difficulty::Easy, Difficulty::Medium, Difficulty::Hard];
+        &DIFFICULTIES
     }
 }
 
@@ -179,7 +180,7 @@ impl Category {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum QuestionType {
     MultipleChoice,
     TrueFalse,
@@ -195,7 +196,7 @@ impl From<String> for QuestionType {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Question {
     #[serde(rename = "type")]
     pub question_type: QuestionType,
@@ -221,19 +222,22 @@ impl Question {
             category,
             difficulty,
             question,
-        answers,
+            answers,
             correct_answer,
         }
     }
 
     /// Returns all the answers in a vector
     pub fn all_answers(&self) -> Vec<String> {
-         self.answers.clone()
+        self.answers.clone()
     }
 
     /// Returns the index of the correct answer
     pub fn correct_answer_index(&self) -> usize {
-        self.answers.iter().position(|answer| answer == &self.correct_answer).unwrap()
+        self.answers
+            .iter()
+            .position(|answer| answer == &self.correct_answer)
+            .unwrap()
     }
 }
 
@@ -256,13 +260,15 @@ struct OpenTDBQuestion {
 
 impl From<OpenTDBQuestion> for Question {
     fn from(question: OpenTDBQuestion) -> Self {
-        
         // Find the category by name
         let category = find_category_by_name(&question.category);
 
-
         let correct_answer = decode_html(&question.correct_answer);
-        let mut incorrect_answers: Vec<String> = question.incorrect_answers.into_iter().map(|answer|decode_html(&answer)).collect();
+        let mut incorrect_answers: Vec<String> = question
+            .incorrect_answers
+            .into_iter()
+            .map(|answer| decode_html(&answer))
+            .collect();
         incorrect_answers.push(correct_answer.clone());
         incorrect_answers.shuffle(&mut thread_rng());
 
@@ -309,7 +315,7 @@ pub async fn fetch_questions_from_opentdb(
     let response = reqwest::get(url)
         .await
         .map_err(|e| format!("Failed to fetch questions: {}", e))?;
-    
+
     // Get the body of the response
     let body = response
         .text()
@@ -322,14 +328,20 @@ pub async fn fetch_questions_from_opentdb(
 
     // Check if the response code is not 0
     if trivia_db_response.response_code != 0 {
-        return Err(format!("Failed to fetch questions: {}", trivia_db_response.response_code));
+        return Err(format!(
+            "Failed to fetch questions: {}",
+            trivia_db_response.response_code
+        ));
     }
 
     // Convert the vector of OpenTDB questions to a vector of questions
-    let questions = trivia_db_response.results.into_iter().map(Question::from).collect();
+    let questions = trivia_db_response
+        .results
+        .into_iter()
+        .map(Question::from)
+        .collect();
     Ok(questions)
 }
-
 
 /// Decodes HTML entities in a string
 fn decode_html(s: &str) -> String {
