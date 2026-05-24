@@ -53,6 +53,7 @@ cargo run --release
 | Category / Difficulty | `Esc`    | Back                |
 | Category / Difficulty | `q`      | Quit                |
 | Playing       | `↑` / `↓` or `j` / `k` | Choose answer |
+| Playing       | `1`–`4`           | Choose answer (by number) |
 | Playing       | `Enter` / `Space`| Submit answer       |
 | Playing       | `Esc` / `q`      | Return to main menu |
 | Name input    | Type (max 3)     | Enter initials      |
