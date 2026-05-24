@@ -260,6 +260,14 @@ impl App {
                 self.screen = Screen::MainMenu;
                 self.menu_cursor = 0;
             }
+            KeyCode::Char('1') => {
+                self.option_cursor = 0;
+            }
+            KeyCode::Char('2') => {
+                self.option_cursor = 1;
+            }
+            KeyCode::Char('3') if options_len > 2 => self.option_cursor = 2,
+            KeyCode::Char('4') if options_len > 3 => self.option_cursor = 3,
             _ => {}
         }
     }

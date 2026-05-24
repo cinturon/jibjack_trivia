@@ -359,7 +359,10 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
             q.answers
                 .iter()
                 .enumerate()
-                .map(|(i, a)| selected_list_item(a, i == app.option_cursor))
+                .map(|(i, a)| {
+                    let label = format!("{}. {}", i + 1, a);
+                    selected_list_item(&label, i == app.option_cursor)
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -370,6 +373,7 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
             ("↑↓", "Answer"),
             ("Enter", "Submit"),
             ("Esc", "Menu"),
+            ("1-4", "Answer")
         ]))
         .alignment(Alignment::Center),
         chunks[4],
