@@ -3,6 +3,7 @@ use crate::trivia::{Category, Difficulty, Question, fetch_questions_from_opentdb
 use crossterm::event::{KeyCode, KeyEvent};
 use std::error::Error;
 use tokio::sync::oneshot;
+use crate::ascii;
 
 const MS_PER_TICK: u64 = 50;
 const MENU_ITEMS: &[&str] = &["Play", "High Scores", "Quit"];
@@ -48,6 +49,8 @@ pub struct App {
     pub loading_error: Option<String>,
     pub scores: Vec<HighScore>,
     pub name_input: String,
+    pub loading_dots: usize,
+    pub loading_dots_tick: usize,
     pub should_quit: bool,
 }
 
@@ -76,11 +79,15 @@ impl App {
             reveal_time: 0,
             questions_rx: None,
             loading_error: None,
+            loading_dots: 0,
+            loading_dots_tick: 0,
         }
     }
 
     pub fn start_loading(&mut self) {
         self.loading_error = None;
+        self.loading_dots = 0;
+        self.loading_dots_tick = 0;
         self.screen = Screen::Loading;
 
         let (tx, rx) = oneshot::channel();
@@ -340,6 +347,12 @@ impl App {
     }
 
     pub fn handle_loading_tick(&mut self) {
+        self.loading_dots_tick += 1;
+        if self.loading_dots_tick.is_multiple_of(3) {
+            self.loading_dots = (self.loading_dots + 1) % ascii::LOADING_FRAMES.len();
+        }
+       
+
         if let Some(mut questions_rx) = self.questions_rx.take() {
             match questions_rx.try_recv() {
                 // If the questions are fetched successfully, start the game

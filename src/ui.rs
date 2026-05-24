@@ -254,7 +254,7 @@ fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
         );
     } else {
         let frame = ascii::LOADING_FRAMES
-            [(app.question_time as usize / 3) % ascii::LOADING_FRAMES.len()];
+            [app.loading_dots % ascii::LOADING_FRAMES.len()];
         let text = Text::from(vec![
             Line::from(""),
             Line::from(Span::styled(
