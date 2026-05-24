@@ -7,9 +7,15 @@ use crate::ascii;
 
 const MS_PER_TICK: u64 = 50;
 const MENU_ITEMS: &[&str] = &["Play", "High Scores", "Quit"];
+/// Max seconds that can be stored in the bonus time bank between questions.
+const BONUS_BANK_CAP: u64 = 60;
 
 fn secs_to_ticks(secs: u64) -> u64 {
     secs * 1000 / MS_PER_TICK
+}
+
+fn ticks_to_secs(ticks: u64) -> u64 {
+    ticks * MS_PER_TICK / 1000
 }
 
 #[derive(Debug)]
@@ -44,6 +50,12 @@ pub struct App {
     pub answered: bool,
     pub last_correct: bool,
     pub question_time: u64,
+    /// Bonus points earned on the last correct answer (for answer-reveal UI).
+    pub time_bonus: u32,
+    /// Seconds banked from fast answers; extends the clock after the per-question limit.
+    pub bonus_bank_secs: u64,
+    /// Seconds added to the bank on the last correct answer (for answer-reveal UI).
+    pub bank_deposit: u64,
     pub reveal_time: u64,
     pub questions_rx: Option<oneshot::Receiver<Result<Vec<Question>, String>>>,
     pub loading_error: Option<String>,
@@ -76,6 +88,9 @@ impl App {
             answered: false,
             last_correct: false,
             question_time: 0,
+            time_bonus: 0,
+            bonus_bank_secs: 0,
+            bank_deposit: 0,
             reveal_time: 0,
             questions_rx: None,
             loading_error: None,
@@ -298,10 +313,14 @@ impl App {
 
     pub fn handle_playing_tick(&mut self) {
         self.question_time += 1;
-        let limit = secs_to_ticks(self.difficulty.time_limit_secs());
-        if self.question_time >= limit {
+        let limit_ticks = secs_to_ticks(self.difficulty.time_limit_secs());
+        let max_ticks = limit_ticks + secs_to_ticks(self.bonus_bank_secs);
+        if self.question_time >= max_ticks {
+            self.commit_bank_usage();
             self.answered = true;
             self.last_correct = false;
+            self.time_bonus = 0;
+            self.bank_deposit = 0;
             self.reveal_time = 0;
             self.screen = Screen::AnswerReveal;
         }
@@ -314,6 +333,44 @@ impl App {
         }
     }
 
+    /// Seconds left on the per-question countdown (not including the bank).
+    pub fn secs_remaining(&self) -> u64 {
+        let limit = self.difficulty.time_limit_secs();
+        let elapsed = ticks_to_secs(self.question_time);
+        limit.saturating_sub(elapsed)
+    }
+
+    /// Seconds still available from the bonus bank on this question.
+    pub fn bank_secs_remaining(&self) -> u64 {
+        let limit_ticks = secs_to_ticks(self.difficulty.time_limit_secs());
+        if self.question_time <= limit_ticks {
+            return self.bonus_bank_secs;
+        }
+        let bank_used = ticks_to_secs(self.question_time - limit_ticks);
+        self.bonus_bank_secs.saturating_sub(bank_used)
+    }
+
+    /// Combined time left (question clock + bank).
+    pub fn total_secs_remaining(&self) -> u64 {
+        self.secs_remaining() + self.bank_secs_remaining()
+    }
+
+    fn commit_bank_usage(&mut self) {
+        let limit_ticks = secs_to_ticks(self.difficulty.time_limit_secs());
+        let bank_used = ticks_to_secs(self.question_time.saturating_sub(limit_ticks));
+        self.bonus_bank_secs = self.bonus_bank_secs.saturating_sub(bank_used);
+    }
+
+    fn deposit_into_bank(&mut self, secs: u64) {
+        if secs == 0 {
+            self.bank_deposit = 0;
+            return;
+        }
+        let deposit = secs / 2;
+        self.bank_deposit = deposit;
+        self.bonus_bank_secs = (self.bonus_bank_secs + deposit).min(BONUS_BANK_CAP);
+    }
+
     fn submit_answer(&mut self) {
         let Some(question) = self.current_question.as_ref() else {
             return;
@@ -322,9 +379,18 @@ impl App {
         self.answered = true;
         self.last_correct = self.option_cursor == question.correct_answer_index();
 
+        self.commit_bank_usage();
         if self.last_correct {
-            self.score += self.difficulty.points_value();
+            // Base points for difficulty + 1 point per second still on the question clock
+            let base = self.difficulty.points_value();
+            let bonus = self.secs_remaining() as u32;
+            self.time_bonus = bonus;
+            self.score += base + bonus;
             self.correct_count += 1;
+            self.deposit_into_bank(self.secs_remaining());
+        } else {
+            self.time_bonus = 0;
+            self.bank_deposit = 0;
         }
 
         self.reveal_time = 0;
@@ -367,6 +433,8 @@ impl App {
                     self.answered = false;
                     self.last_correct = false;
                     self.question_time = 0;
+                    self.bonus_bank_secs = 0;
+                    self.bank_deposit = 0;
                     self.reveal_time = 0;
                     self.questions_rx = None;
                 }
