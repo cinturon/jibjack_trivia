@@ -1,7 +1,7 @@
 use crate::scores::{add_high_score, load_high_scores, is_high_score, HighScore};
 use crate::trivia::{
     Category, Difficulty, Question, TriviaSource, fetch_questions_from_openai,
-    fetch_questions_from_opentdb, fetch_questions_from_anthropic,
+    fetch_questions_from_opentdb, fetch_questions_from_anthropic, validate_source_config,
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
@@ -126,6 +126,12 @@ impl App {
         self.loading_dots = 0;
         self.loading_dots_tick = 0;
         self.screen = Screen::Loading;
+
+        if let Err(error) = validate_source_config(self.question_source) {
+            self.loading_error = Some(error);
+            self.questions_rx = None;
+            return;
+        }
 
         let (tx, rx) = oneshot::channel();
         self.questions_rx = Some(rx);
