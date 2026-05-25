@@ -10,9 +10,9 @@ use ratatui::{
     },
 };
 
-use crate::trivia::TriviaSource;
 use crate::app::{App, Screen};
 use crate::ascii;
+use crate::trivia::TriviaSource;
 
 const COL_PRIMARY: Color = Color::Cyan;
 const COL_ACCENT: Color = Color::Yellow;
@@ -255,7 +255,6 @@ fn draw_question_source(f: &mut Frame, app: &App, area: Rect) {
         .alignment(Alignment::Center),
         chunks[1],
     );
-
 }
 
 fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
@@ -289,41 +288,32 @@ fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
         let frame = ascii::LOADING_FRAMES[app.loading_dots % ascii::LOADING_FRAMES.len()];
 
         let loading_text = match app.question_source {
-            TriviaSource::OpenTriviaDB => format!("{frame} Fetching questions from Open Trivia DB…"),
+            TriviaSource::OpenTriviaDB => {
+                format!("{frame} Fetching questions from Open Trivia DB…")
+            }
             TriviaSource::OpenAI => format!("{frame} Thinking of questions from OpenAI…"),
             TriviaSource::Anthropic => format!("{frame} Thinking of questions from Anthropic…"),
         };
 
         let text = if is_ai_source {
-            let brain_art = ascii::BRAIN_ART.trim_matches('\n');
-            let art_width = brain_art
-                .lines()
-                .map(|line| line.chars().count())
-                .max()
-                .unwrap_or(0);
+            let mut brain_art = draw_ascii_art(ascii::BRAIN_ART, COL_ACCENT);
 
-            let mut lines: Vec<Line> = brain_art
-                .lines()
-                .map(|line| {
-                    Line::from(Span::styled(
-                        format!("{line:<art_width$}"),
-                        Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD),
-                    ))
-                })
-                .collect();
-
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
+            brain_art.push(Line::from(""));
+            brain_art.push(Line::from(Span::styled(
                 loading_text,
-                Style::default().fg(COL_PRIMARY).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(COL_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
             )));
-            Text::from(lines)
+            Text::from(brain_art)
         } else {
             Text::from(vec![
                 Line::from(""),
                 Line::from(Span::styled(
                     loading_text,
-                    Style::default().fg(COL_PRIMARY).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(COL_PRIMARY)
+                        .add_modifier(Modifier::BOLD),
                 )),
             ])
         };
@@ -459,23 +449,9 @@ fn draw_answer_reveal(f: &mut Frame, app: &App, area: Rect) {
         .map(|q| q.correct_answer.as_str())
         .unwrap_or("");
 
-    let art = art.trim_matches('\n');
-    let art_width = art
-        .lines()
-        .map(|line| line.chars().count())
-        .max()
-        .unwrap_or(0);
-    let mut lines: Vec<Line> = art
-        .lines()
-        .map(|line| {
-            Line::from(Span::styled(
-                format!("{line:<art_width$}"),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ))
-        })
-        .collect();
+    let mut art = draw_ascii_art(art, color);
 
-    lines.extend([
+    art.extend([
         Line::from(""),
         Line::from(Span::styled(
             format!("Answer: {correct}"),
@@ -499,7 +475,7 @@ fn draw_answer_reveal(f: &mut Frame, app: &App, area: Rect) {
             Span::raw("")
         }),
     ]);
-    let text = Text::from(lines);
+    let text = Text::from(art);
 
     f.render_widget(Clear, popup);
     f.render_widget(
@@ -534,29 +510,14 @@ fn draw_name_input(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     let prompt = if app.earned_high_score {
-        let art = ascii::TROPHY_ART.trim_matches('\n');
-        let art_width = art
-            .lines()
-            .map(|line| line.chars().count())
-            .max()
-            .unwrap_or(0);
-        let mut lines: Vec<Line> = art
-            .lines()
-            .map(|line| {
-                Line::from(Span::styled(
-                    format!("{line:<art_width$}"),
-                    Style::default()
-                        .fg(COL_ACCENT)
-                        .add_modifier(Modifier::BOLD),
-                ))
-            })
-            .collect();
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
+        let mut trophy_art = draw_ascii_art(ascii::TROPHY_ART, COL_ACCENT);
+        
+        trophy_art.push(Line::from(""));
+        trophy_art.push(Line::from(Span::styled(
             "You've earned a high score! Enter your initials for the board",
             Style::default().fg(COL_DIM),
         )));
-        Text::from(lines)
+        Text::from(trophy_art)
     } else {
         Text::from(vec![
             Line::from(""),
@@ -597,11 +558,12 @@ fn draw_game_over(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let art = ascii::GAME_OVER_ART.trim_matches('\n');
-    let art_height = art.lines().count() as u16;
-    let art_width = art
-        .lines()
-        .map(|line| line.chars().count())
+
+    let game_over_art = draw_ascii_art(ascii::GAME_OVER_ART, COL_WRONG);
+    let art_height = game_over_art.len() as u16;
+    let art_width = game_over_art
+        .iter()
+        .map(|line| line.to_string().len())
         .max()
         .unwrap_or(0) as u16;
 
@@ -611,16 +573,8 @@ fn draw_game_over(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     let art_area = centred_rect(art_width, art_height, chunks[0]);
-    let art_lines: Vec<Line> = art
-        .lines()
-        .map(|line| {
-            Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(COL_WRONG).add_modifier(Modifier::BOLD),
-            ))
-        })
-        .collect();
-    f.render_widget(Paragraph::new(Text::from(art_lines)), art_area);
+    let game_over_art = draw_ascii_art(ascii::GAME_OVER_ART, COL_WRONG);
+    f.render_widget(Paragraph::new(Text::from(game_over_art)), art_area);
 
     let text = Text::from(vec![
         Line::from(""),
@@ -737,4 +691,23 @@ fn draw_high_scores(f: &mut Frame, app: &App, area: Rect) {
         .alignment(Alignment::Center),
         chunks[2],
     );
+}
+
+fn draw_ascii_art(art: &str, color: Color) -> Vec<Line<'_>> {
+    let art = art.trim_matches('\n');
+    let art_width = art
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    let lines: Vec<Line> = art
+        .lines()
+        .map(|line| {
+            Line::from(Span::styled(
+                format!("{line:<art_width$}"),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ))
+        })
+        .collect();
+    lines
 }

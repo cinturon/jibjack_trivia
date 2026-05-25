@@ -1,8 +1,36 @@
+use anthropic_sdk::{Anthropic, ContentBlock, MessageCreateBuilder};
+use async_openai::{Client, types::responses::CreateResponseArgs};
 use html_escape::decode_html_entities;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+
+const OPENTRIVIADB_API_URL: &str = "https://opentdb.com/api.php";
+
+const OPENAI_MODEL: &str = "gpt-4o-mini";
+const ANTHROPIC_MODEL: &str = "claude-sonnet-4-5-20250929";
+
+const PROMPT: &str = "You are a trivia game host.
+You are given a category and difficulty.
+The question is multiple choice, generate one correct answer and three incorrect answers.
+Return only JSON. Do not wrap it in Markdown.
+Only return the JSON object, no other text.
+Use this valid JSON shape:
+{
+    \"response_code\": 0,
+    \"results\": [
+        {
+            \"type\": \"multiple\",
+            \"category\": \"category\",
+            \"difficulty\": \"difficulty\",
+            \"question\": \"question\",
+            \"correct_answer\": \"correct_answer\",
+            \"incorrect_answers\": [\"answer1\", \"answer2\", \"answer3\"]
+        }
+    ]
+}
+";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Difficulty {
@@ -28,7 +56,11 @@ impl TriviaSource {
     }
 
     pub fn all() -> &'static [TriviaSource] {
-        &[TriviaSource::OpenTriviaDB, TriviaSource::OpenAI, TriviaSource::Anthropic]
+        &[
+            TriviaSource::OpenTriviaDB,
+            TriviaSource::OpenAI,
+            TriviaSource::Anthropic,
+        ]
     }
 }
 impl Difficulty {
@@ -317,7 +349,8 @@ pub async fn fetch_questions_from_opentdb(
     count: u32,
 ) -> Result<Vec<Question>, String> {
     let mut url = format!(
-        "https://opentdb.com/api.php?amount={}&difficulty={}",
+        "{}?amount={}&difficulty={}",
+        OPENTRIVIADB_API_URL,
         count,
         difficulty.as_str()
     );
@@ -358,7 +391,191 @@ pub async fn fetch_questions_from_opentdb(
     Ok(questions)
 }
 
+pub async fn fetch_questions_from_openai(
+    category: Category,
+    difficulty: Difficulty,
+    count: u32,
+) -> Result<Vec<Question>, String> {
+    let client = Client::new();
+    let prompt = format!(
+        "{PROMPT}\nGenerate {count} questions for category \"{}\" at {} difficulty.",
+        category.name,
+        difficulty.as_str()
+    );
+    let request = CreateResponseArgs::default()
+        .model(OPENAI_MODEL)
+        .input(prompt)
+        .max_output_tokens(4_000_u32)
+        .build()
+        .map_err(|e| format!("Failed to build OpenAI request: {e}"))?;
+
+    let response = client
+        .responses()
+        .create(request)
+        .await
+        .map_err(|e| format!("Failed to fetch questions from OpenAI: {e}"))?;
+
+    let body = response
+        .output_text()
+        .ok_or_else(|| "OpenAI response did not include output text".to_string())?;
+    let trivia_db_response = parse_ai_questions_body(&body, "OpenAI")?;
+
+    if trivia_db_response.response_code != 0 {
+        return Err(format!(
+            "OpenAI returned non-zero response code: {}",
+            trivia_db_response.response_code
+        ));
+    }
+
+    Ok(trivia_db_response
+        .results
+        .into_iter()
+        .map(Question::from)
+        .collect())
+}
+
+pub async fn fetch_questions_from_anthropic(
+    category: Category,
+    difficulty: Difficulty,
+    count: u32,
+) -> Result<Vec<Question>, String> {
+    let client =
+        Anthropic::from_env().map_err(|e| format!("Failed to create Anthropic client: {e}"))?;
+
+    let prompt = format!(
+        "{PROMPT}\nGenerate {count} questions for category \"{}\" at {} difficulty.",
+        category.name,
+        difficulty.as_str()
+    );
+
+    let response = client
+        .messages()
+        .create(
+            MessageCreateBuilder::new(ANTHROPIC_MODEL, 4000)
+                .user(prompt)
+                .build(),
+        )
+        .await
+        .map_err(|e| format!("Failed to create Anthropic message: {e}"))?;
+
+    let body = response
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if body.trim().is_empty() {
+        return Err("Anthropic response did not include text content".to_string());
+    }
+
+    let trivia_db_response = parse_ai_questions_body(&body, "Anthropic")?;
+
+    if trivia_db_response.response_code != 0 {
+        return Err(format!(
+            "Anthropic returned non-zero response code: {}",
+            trivia_db_response.response_code
+        ));
+    }
+
+    Ok(trivia_db_response
+        .results
+        .into_iter()
+        .map(Question::from)
+        .collect())
+}
+
+fn parse_ai_questions_body(body: &str, provider: &str) -> Result<OpenTDBResponse, String> {
+    serde_json::from_str(body.trim()).or_else(|initial_error| {
+        let json = extract_json_object(body)
+            .ok_or_else(|| format!("Failed to parse {provider} questions: {initial_error}"))?;
+
+        serde_json::from_str(json).map_err(|e| format!("Failed to parse {provider} questions: {e}"))
+    })
+}
+
+fn extract_json_object(body: &str) -> Option<&str> {
+    let mut start = None;
+    let mut depth = 0_u32;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (idx, ch) in body.char_indices() {
+        if start.is_none() {
+            if ch == '{' {
+                start = Some(idx);
+                depth = 1;
+            }
+            continue;
+        }
+
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return start.map(|start_idx| &body[start_idx..=idx]);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 /// Decodes HTML entities in a string
 fn decode_html(s: &str) -> String {
     decode_html_entities(s).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_questions_json() -> &'static str {
+        r#"{
+            "response_code": 0,
+            "results": [
+                {
+                    "type": "multiple",
+                    "category": "Science: Computers",
+                    "difficulty": "easy",
+                    "question": "What does CPU stand for?",
+                    "correct_answer": "Central Processing Unit",
+                    "incorrect_answers": [
+                        "Computer Personal Unit",
+                        "Central Program Utility",
+                        "Control Processing Utility"
+                    ]
+                }
+            ]
+        }"#
+    }
+
+    #[test]
+    fn parses_anthropic_json_inside_markdown_fence() {
+        let body = format!("```json\n{}\n```", sample_questions_json());
+
+        let parsed = parse_ai_questions_body(&body, "Anthropic").unwrap();
+
+        assert_eq!(parsed.response_code, 0);
+        assert_eq!(parsed.results.len(), 1);
+        assert_eq!(parsed.results[0].correct_answer, "Central Processing Unit");
+    }
 }
