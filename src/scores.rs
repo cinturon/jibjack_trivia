@@ -26,7 +26,8 @@ pub fn load_high_scores() -> Result<Vec<HighScore>, Box<dyn Error>> {
         if path.exists() {
             let file = File::open(path)?;
             let reader = BufReader::new(file);
-            let scores: Vec<HighScore> = serde_json::from_reader(reader)?;
+            let mut scores: Vec<HighScore> = serde_json::from_reader(reader)?;
+            scores.sort_by(|a, b| b.score.cmp(&a.score));
             Ok(scores)
         } else {
             Ok(vec![])
@@ -66,6 +67,7 @@ pub fn add_high_score(initials: String, score: u32) -> Result<(), Box<dyn Error>
 
     // Keep only the top 10 scores
     scores = scores.into_iter().rev().take(10).collect();
+
 
     save_high_scores(scores)?;
     Ok(())

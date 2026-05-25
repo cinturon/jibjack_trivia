@@ -6,8 +6,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, Borders, BorderType, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Table,
-        Wrap,
+        Block, BorderType, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Table, Wrap,
     },
 };
 
@@ -109,7 +108,11 @@ fn draw_splash(f: &mut Frame, area: Rect) {
 
     let art = Paragraph::new(ascii::TITLE_ART)
         .alignment(Alignment::Center)
-        .style(Style::default().fg(COL_PRIMARY).add_modifier(Modifier::BOLD));
+        .style(
+            Style::default()
+                .fg(COL_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_widget(art, chunks[1]);
 
     let prompt = Paragraph::new(vec![
@@ -118,7 +121,10 @@ fn draw_splash(f: &mut Frame, area: Rect) {
             "Press Enter to start",
             Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled("q / Esc to quit", Style::default().fg(COL_DIM))),
+        Line::from(Span::styled(
+            "q / Esc to quit",
+            Style::default().fg(COL_DIM),
+        )),
     ])
     .alignment(Alignment::Center);
     f.render_widget(prompt, chunks[2]);
@@ -179,7 +185,6 @@ fn draw_category_select(f: &mut Frame, app: &mut App, area: Rect) {
         .enumerate()
         .map(|(i, cat)| selected_list_item(cat.name, i == app.category_cursor))
         .collect();
-
 
     let list = List::new(items);
 
@@ -258,13 +263,14 @@ fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
             popup,
         );
     } else {
-        let frame = ascii::LOADING_FRAMES
-            [app.loading_dots % ascii::LOADING_FRAMES.len()];
+        let frame = ascii::LOADING_FRAMES[app.loading_dots % ascii::LOADING_FRAMES.len()];
         let text = Text::from(vec![
             Line::from(""),
             Line::from(Span::styled(
                 format!("{frame} Fetching questions from Open Trivia DB…"),
-                Style::default().fg(COL_PRIMARY).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(COL_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
             )),
         ]);
         f.render_widget(Clear, popup);
@@ -373,7 +379,7 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
             ("↑↓", "Answer"),
             ("Enter", "Submit"),
             ("Esc", "Menu"),
-            ("1-4", "Answer")
+            ("1-4", "Answer"),
         ]))
         .alignment(Alignment::Center),
         chunks[4],
@@ -501,12 +507,30 @@ fn draw_game_over(f: &mut Frame, app: &App, area: Rect) {
             "r — play again   h — high scores   q — menu",
             Style::default().fg(COL_DIM),
         )),
+        Line::from(if let Some(error) = &app.saved_scores_error {
+            Span::styled(format!("Error saving scores: {error}"), Style::default().fg(COL_WRONG))
+        } else {
+            Span::raw("")
+        }),
     ]);
 
-    f.render_widget(
-        Paragraph::new(text).alignment(Alignment::Center),
-        inner,
-    );
+    f.render_widget(Paragraph::new(text).alignment(Alignment::Center), inner);
+}
+
+fn high_score_row(i: usize, s: &crate::scores::HighScore) -> Row<'_> {
+    let style = match i {
+        0 => Style::default().fg(COL_CORRECT).add_modifier(Modifier::BOLD),
+        1 => Style::default().fg(COL_HIGHLIGHT),
+        2 => Style::default().fg(COL_ACCENT),
+        _ => Style::default().fg(COL_DIM),
+    };
+    Row::new(vec![
+        Cell::from(format!("{}", i + 1)),
+        Cell::from(s.initials.clone()),
+        Cell::from(format!("{}", s.score)),
+        Cell::from(s.date.clone()),
+    ])
+    .style(style)
 }
 
 fn draw_high_scores(f: &mut Frame, app: &App, area: Rect) {
@@ -514,35 +538,65 @@ fn draw_high_scores(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let rows: Vec<Row> = if app.scores.is_empty() {
-        vec![Row::new(vec![Cell::from("No scores yet — play a game!")])]
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(if app.score > 0 { 2 } else { 0 }),
+            Constraint::Min(1),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+
+    if app.score > 0 {
+        let your_score = Paragraph::new(format!("Last game score: {}", app.score))
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD));
+        f.render_widget(your_score, chunks[0]);
+    }
+
+    if app.scores.is_empty() {
+        let empty = Paragraph::new("No scores yet — play a game!")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(COL_DIM));
+        f.render_widget(empty, chunks[1]);
     } else {
-        app.scores
+        let rows: Vec<Row> = app
+            .scores
             .iter()
             .enumerate()
-            .map(|(i, s)| {
-                Row::new(vec![
-                    Cell::from(format!("{}", i + 1)),
-                    Cell::from(s.initials.clone()),
-                    Cell::from(format!("{}", s.score)),
-                    Cell::from(s.date.clone()),
-                ])
-            })
-            .collect()
-    };
+            .map(|(i, s)| high_score_row(i, s))
+            .collect();
+        let table_area = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Fill(1),
+                Constraint::Length(36),
+                Constraint::Fill(1),
+            ])
+            .split(chunks[1]);
 
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(4),
-            Constraint::Length(8),
-            Constraint::Length(8),
-            Constraint::Min(10),
-        ],
-    )
-    .header(Row::new(vec!["#", "Name", "Score", "Date"]).style(
-        Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD),
-    ));
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(4),
+                Constraint::Length(8),
+                Constraint::Length(8),
+                Constraint::Min(10),
+            ],
+        )
+        .header(
+            Row::new(vec!["#", "Name", "Score", "Date"])
+                .style(Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD)),
+        );
 
-    f.render_widget(table, inner);
+        f.render_widget(table, table_area[1]);
+    }
+
+    f.render_widget(
+        Paragraph::new(hint_line(&[("Esc", "Menu"), ("q", "Menu"),
+        ("Enter", "Menu")]))
+            .alignment(Alignment::Center),
+        chunks[2],
+    );
 }

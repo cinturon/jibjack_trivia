@@ -68,6 +68,7 @@ pub struct App {
     pub loading_dots: usize,
     pub loading_dots_tick: usize,
     pub should_quit: bool,
+    pub saved_scores_error: Option<String>,
 }
 
 impl App {
@@ -103,6 +104,7 @@ impl App {
             loading_error: None,
             loading_dots: 0,
             loading_dots_tick: 0,
+            saved_scores_error: None,
         }
     }
 
@@ -172,7 +174,10 @@ impl App {
                     self.category_list_state.select(Some(0));
                     self.screen = Screen::CategorySelect;
                 }
-                1 => self.screen = Screen::HighScores,
+                1 => {
+                    self.scores = load_high_scores().unwrap_or_default();
+                    self.screen = Screen::HighScores;
+                }
                 _ => self.should_quit = true,
             },
             _ => {}
@@ -280,9 +285,17 @@ impl App {
                 } else {
                     self.name_input.trim().to_uppercase()
                 };
-                let _ = add_high_score(initials, self.score);
-                self.scores = load_high_scores().unwrap_or_default();
-                self.screen = Screen::GameOver;
+                match add_high_score(initials, self.score) {
+                    Ok(_) => {
+                        self.scores = load_high_scores().unwrap_or_default();
+                        self.saved_scores_error = None;
+                        self.screen = Screen::GameOver;
+                    }
+                    Err(e) => {
+                        self.saved_scores_error = Some(e.to_string());
+                        self.screen = Screen::GameOver;
+                    }
+                }
             }
             KeyCode::Backspace => {
                 self.name_input.pop();
@@ -301,7 +314,10 @@ impl App {
                 self.option_cursor = 0;
                 self.screen = Screen::CategorySelect;
             }
-            KeyCode::Char('h') => self.screen = Screen::HighScores,
+            KeyCode::Char('h') => {
+                self.scores = load_high_scores().unwrap_or_default();
+                self.screen = Screen::HighScores;
+            }
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.screen = Screen::MainMenu;
                 self.menu_cursor = 0;
