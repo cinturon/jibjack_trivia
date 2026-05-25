@@ -73,6 +73,10 @@ pub fn add_high_score(initials: String, score: u32) -> Result<(), Box<dyn Error>
     Ok(())
 }
 
+pub fn is_high_score(scores: &[HighScore], score: u32) -> bool {
+    scores.len() < 10 || scores.iter().any(|saved| score >= saved.score)
+}
+
 fn today_string() -> String {
     let now = Utc::now();
     now.format("%Y-%m-%d").to_string()

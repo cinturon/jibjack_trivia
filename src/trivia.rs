@@ -11,6 +11,26 @@ pub enum Difficulty {
     Hard,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TriviaSource {
+    OpenTriviaDB,
+    OpenAI,
+    Anthropic,
+}
+
+impl TriviaSource {
+    pub fn as_str(&self) -> &str {
+        match self {
+            TriviaSource::OpenTriviaDB => "Open Trivia DB",
+            TriviaSource::OpenAI => "OpenAI",
+            TriviaSource::Anthropic => "Anthropic",
+        }
+    }
+
+    pub fn all() -> &'static [TriviaSource] {
+        &[TriviaSource::OpenTriviaDB, TriviaSource::OpenAI, TriviaSource::Anthropic]
+    }
+}
 impl Difficulty {
     /// Returns the string representation of the difficulty
     pub fn as_str(&self) -> &str {
@@ -24,9 +44,9 @@ impl Difficulty {
     /// Returns the time limit in seconds for the difficulty
     pub fn time_limit_secs(&self) -> u64 {
         match self {
-            Difficulty::Easy => 20,
-            Difficulty::Medium => 15,
-            Difficulty::Hard => 10,
+            Difficulty::Easy => 10,
+            Difficulty::Medium => 5,
+            Difficulty::Hard => 3,
         }
     }
 
@@ -225,11 +245,6 @@ impl Question {
             answers,
             correct_answer,
         }
-    }
-
-    /// Returns all the answers in a vector
-    pub fn all_answers(&self) -> Vec<String> {
-        self.answers.clone()
     }
 
     /// Returns the index of the correct answer

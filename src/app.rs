@@ -1,5 +1,5 @@
-use crate::scores::{add_high_score, load_high_scores, HighScore};
-use crate::trivia::{Category, Difficulty, Question, fetch_questions_from_opentdb};
+use crate::scores::{add_high_score, load_high_scores, is_high_score, HighScore};
+use crate::trivia::{Category, Difficulty, Question, TriviaSource, fetch_questions_from_opentdb};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 use std::error::Error;
@@ -45,11 +45,15 @@ pub struct App {
     pub categories: &'static [Category],
     pub category_list_state: ListState,
     pub category_cursor: usize,
+    pub question_source: TriviaSource,
+    pub question_sources: &'static [TriviaSource],
+    pub question_source_cursor: usize,
     pub questions: Vec<Question>,
     pub current_q: usize,
     pub current_question: Option<Question>,
     pub option_cursor: usize,
     pub score: u32,
+    pub earned_high_score: bool,
     pub correct_count: u32,
     pub answered: bool,
     pub last_correct: bool,
@@ -69,6 +73,7 @@ pub struct App {
     pub loading_dots_tick: usize,
     pub should_quit: bool,
     pub saved_scores_error: Option<String>,
+    pub last_timed_out: bool,
 }
 
 impl App {
@@ -83,6 +88,9 @@ impl App {
             category: Category::all()[0],
             categories: Category::all(),
             category_list_state: ListState::default(),
+            question_source: TriviaSource::OpenTriviaDB,
+            question_sources: TriviaSource::all(),
+            question_source_cursor: 0,
             category_cursor: 0,
             scores: load_high_scores().unwrap_or_default(),
             name_input: String::new(),
@@ -92,6 +100,7 @@ impl App {
             current_question: None,
             option_cursor: 0,
             score: 0,
+            earned_high_score: false,
             correct_count: 0,
             answered: false,
             last_correct: false,
@@ -104,6 +113,7 @@ impl App {
             loading_error: None,
             loading_dots: 0,
             loading_dots_tick: 0,
+            last_timed_out: false,
             saved_scores_error: None,
         }
     }
@@ -133,12 +143,12 @@ impl App {
             Screen::CategorySelect => self.handle_category_select_key(key),
             Screen::DifficultySelect => self.handle_difficulty_select_key(key),
             Screen::Loading => self.handle_loading_key(key),
+            Screen::QuestionSource => self.handle_question_source_key(key),
             Screen::Playing => self.handle_playing_key(key),
             Screen::AnswerReveal => {}
             Screen::NameInput => self.handle_name_input_key(key),
             Screen::GameOver => self.handle_game_over_key(key),
             Screen::HighScores => self.handle_high_scores_key(key),
-            Screen::QuestionSource => {}
         }
         Ok(())
     }
@@ -218,13 +228,34 @@ impl App {
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 self.difficulty = self.difficulties[self.difficulty_cursor];
-                self.start_loading();
+                // self.start_loading();
+                self.screen = Screen::QuestionSource;
             }
             KeyCode::Esc => {
                 self.difficulty_cursor = 0;
                 self.screen = Screen::CategorySelect;
             }
             KeyCode::Char('q') => self.should_quit = true,
+            _ => {}
+        }
+    }
+
+    pub fn handle_question_source_key(&mut self, key: KeyEvent) {
+        let max = self.question_sources.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.question_source_cursor = self.question_source_cursor.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.question_source_cursor = (self.question_source_cursor + 1).min(max);
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                self.question_source = self.question_sources[self.question_source_cursor];
+                self.start_loading();
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.screen = Screen::DifficultySelect;
+            }
             _ => {}
         }
     }
@@ -346,6 +377,7 @@ impl App {
     }
 
     pub fn handle_playing_tick(&mut self) {
+        // Increment the question time by 50ms or 1 tick
         self.question_time += 1;
         let limit_ticks = secs_to_ticks(self.difficulty.time_limit_secs());
         let max_ticks = limit_ticks + secs_to_ticks(self.bonus_bank_secs);
@@ -356,6 +388,7 @@ impl App {
             self.time_bonus = 0;
             self.bank_deposit = 0;
             self.reveal_time = 0;
+            self.last_timed_out = true;
             self.screen = Screen::AnswerReveal;
         }
     }
@@ -406,6 +439,7 @@ impl App {
     }
 
     fn submit_answer(&mut self) {
+        self.last_timed_out = false;
         let Some(question) = self.current_question.as_ref() else {
             return;
         };
@@ -434,6 +468,7 @@ impl App {
     fn advance_question(&mut self) {
         self.current_q += 1;
         if self.current_q >= self.questions.len() {
+            self.earned_high_score = is_high_score(&self.scores, self.score);
             self.name_input.clear();
             self.screen = Screen::NameInput;
             self.current_question = None;
