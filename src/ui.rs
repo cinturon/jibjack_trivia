@@ -6,13 +6,13 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, Borders, BorderType, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Table,
-        Wrap,
+        Block, BorderType, Borders, Cell, Clear, Gauge, List, ListItem, Paragraph, Row, Table, Wrap,
     },
 };
 
 use crate::app::{App, Screen};
 use crate::ascii;
+use crate::trivia::TriviaSource;
 
 const COL_PRIMARY: Color = Color::Cyan;
 const COL_ACCENT: Color = Color::Yellow;
@@ -21,22 +21,16 @@ const COL_WRONG: Color = Color::Red;
 const COL_DIM: Color = Color::DarkGray;
 const COL_HIGHLIGHT: Color = Color::White;
 
-const MS_PER_TICK: u64 = 50;
-
-fn secs_to_ticks(secs: u64) -> u64 {
-    secs * 1000 / MS_PER_TICK
-}
-
 /// Draw the current screen from `app` state.
-pub fn render(f: &mut Frame, app: &App) {
+pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     match app.screen {
         Screen::Splash => draw_splash(f, area),
         Screen::MainMenu => draw_main_menu(f, app, area),
-        Screen::QuestionSource => draw_placeholder(f, "Question Source", area),
         Screen::CategorySelect => draw_category_select(f, app, area),
         Screen::DifficultySelect => draw_difficulty_select(f, app, area),
+        Screen::QuestionSource => draw_question_source(f, app, area),
         Screen::Loading => draw_loading(f, app, area),
         Screen::Playing => draw_playing(f, app, area),
         Screen::AnswerReveal => draw_answer_reveal(f, app, area),
@@ -109,7 +103,11 @@ fn draw_splash(f: &mut Frame, area: Rect) {
 
     let art = Paragraph::new(ascii::TITLE_ART)
         .alignment(Alignment::Center)
-        .style(Style::default().fg(COL_PRIMARY).add_modifier(Modifier::BOLD));
+        .style(
+            Style::default()
+                .fg(COL_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_widget(art, chunks[1]);
 
     let prompt = Paragraph::new(vec![
@@ -118,7 +116,10 @@ fn draw_splash(f: &mut Frame, area: Rect) {
             "Press Enter to start",
             Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled("q / Esc to quit", Style::default().fg(COL_DIM))),
+        Line::from(Span::styled(
+            "q / Esc to quit",
+            Style::default().fg(COL_DIM),
+        )),
     ])
     .alignment(Alignment::Center);
     f.render_widget(prompt, chunks[2]);
@@ -154,15 +155,7 @@ fn draw_main_menu(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn draw_placeholder(f: &mut Frame, title: &str, area: Rect) {
-    let block = styled_block(title);
-    let p = Paragraph::new("Coming soon")
-        .block(block)
-        .alignment(Alignment::Center);
-    f.render_widget(p, area);
-}
-
-fn draw_category_select(f: &mut Frame, app: &App, area: Rect) {
+fn draw_category_select(f: &mut Frame, app: &mut App, area: Rect) {
     let block = styled_block("Choose Category");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -177,10 +170,14 @@ fn draw_category_select(f: &mut Frame, app: &App, area: Rect) {
         .categories
         .iter()
         .enumerate()
-        .map(|(i, cat)| selected_list_item(cat.name, i == app.option_cursor))
+        .map(|(i, cat)| selected_list_item(cat.name, i == app.category_cursor))
         .collect();
 
-    f.render_widget(List::new(items), chunks[0]);
+    let list = List::new(items);
+
+    app.category_list_state.select(Some(app.category_cursor));
+    f.render_stateful_widget(list, chunks[0], &mut app.category_list_state);
+
     f.render_widget(
         Paragraph::new(hint_line(&[
             ("↑↓", "Navigate"),
@@ -214,7 +211,7 @@ fn draw_difficulty_select(f: &mut Frame, app: &App, area: Rect) {
                 d.time_limit_secs(),
                 d.points_value()
             );
-            selected_list_item(&label, i == app.option_cursor)
+            selected_list_item(&label, i == app.difficulty_cursor)
         })
         .collect();
 
@@ -230,8 +227,43 @@ fn draw_difficulty_select(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+fn draw_question_source(f: &mut Frame, app: &App, area: Rect) {
+    let block = styled_block("Question Source");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .split(inner);
+
+    let items: Vec<ListItem> = app
+        .question_sources
+        .iter()
+        .enumerate()
+        .map(|(i, qs)| selected_list_item(qs.as_str(), i == app.question_source_cursor))
+        .collect();
+
+    f.render_widget(List::new(items), chunks[0]);
+    f.render_widget(
+        Paragraph::new(hint_line(&[
+            ("↑↓", "Navigate"),
+            ("Enter", "Select"),
+            ("Esc", "Back"),
+        ]))
+        .alignment(Alignment::Center),
+        chunks[1],
+    );
+}
+
 fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
-    let popup = centred_rect(52, 9, area);
+    let is_ai_source = matches!(
+        app.question_source,
+        TriviaSource::OpenAI | TriviaSource::Anthropic
+    );
+
+    let popup = centred_rect(52, if is_ai_source { 12 } else { 9 }, area);
 
     if let Some(err) = &app.loading_error {
         let text = Text::from(vec![
@@ -253,15 +285,39 @@ fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
             popup,
         );
     } else {
-        let frame = ascii::LOADING_FRAMES
-            [(app.question_time as usize / 3) % ascii::LOADING_FRAMES.len()];
-        let text = Text::from(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                format!("{frame} Fetching questions from Open Trivia DB…"),
-                Style::default().fg(COL_PRIMARY).add_modifier(Modifier::BOLD),
-            )),
-        ]);
+        let frame = ascii::LOADING_FRAMES[app.loading_dots % ascii::LOADING_FRAMES.len()];
+
+        let loading_text = match app.question_source {
+            TriviaSource::OpenTriviaDB => {
+                format!("{frame} Fetching questions from Open Trivia DB…")
+            }
+            TriviaSource::OpenAI => format!("{frame} Thinking of questions from OpenAI…"),
+            TriviaSource::Anthropic => format!("{frame} Thinking of questions from Anthropic…"),
+        };
+
+        let text = if is_ai_source {
+            let mut brain_art = draw_ascii_art(ascii::BRAIN_ART, COL_ACCENT);
+
+            brain_art.push(Line::from(""));
+            brain_art.push(Line::from(Span::styled(
+                loading_text,
+                Style::default()
+                    .fg(COL_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            Text::from(brain_art)
+        } else {
+            Text::from(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    loading_text,
+                    Style::default()
+                        .fg(COL_PRIMARY)
+                        .add_modifier(Modifier::BOLD),
+                )),
+            ])
+        };
+
         f.render_widget(Clear, popup);
         f.render_widget(
             Paragraph::new(text)
@@ -273,11 +329,26 @@ fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn time_fraction_remaining(app: &App) -> f64 {
-    let limit = secs_to_ticks(app.difficulty.time_limit_secs()) as f64;
-    if limit <= 0.0 {
+    let limit_secs = app.difficulty.time_limit_secs() + app.bonus_bank_secs;
+    if limit_secs == 0 {
         return 0.0;
     }
-    (1.0 - app.question_time as f64 / limit).clamp(0.0, 1.0)
+    (app.total_secs_remaining() as f64 / limit_secs as f64).clamp(0.0, 1.0)
+}
+
+fn time_gauge_label(app: &App) -> String {
+    let bank = app.bank_secs_remaining();
+    if app.secs_remaining() > 0 {
+        if bank > 0 {
+            format!("{}s (+{bank}s bank)", app.secs_remaining())
+        } else {
+            format!("{}s left", app.secs_remaining())
+        }
+    } else if bank > 0 {
+        format!("{bank}s bank")
+    } else {
+        "0s".to_string()
+    }
 }
 
 fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
@@ -329,10 +400,7 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
                 .bg(COL_DIM),
         )
         .ratio(time_fraction_remaining(app))
-        .label(format!(
-            "{}s left",
-            (app.difficulty.time_limit_secs()).saturating_sub(app.question_time * MS_PER_TICK / 1000)
-        ));
+        .label(time_gauge_label(app));
     f.render_widget(gauge, chunks[2]);
 
     let answers: Vec<ListItem> = app
@@ -342,7 +410,10 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
             q.answers
                 .iter()
                 .enumerate()
-                .map(|(i, a)| selected_list_item(a, i == app.option_cursor))
+                .map(|(i, a)| {
+                    let label = format!("{}. {}", i + 1, a);
+                    selected_list_item(&label, i == app.option_cursor)
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -353,6 +424,7 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
             ("↑↓", "Answer"),
             ("Enter", "Submit"),
             ("Esc", "Menu"),
+            ("1-4", "Answer"),
         ]))
         .alignment(Alignment::Center),
         chunks[4],
@@ -360,9 +432,13 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_answer_reveal(f: &mut Frame, app: &App, area: Rect) {
-    let popup = centred_rect(50, 10, area);
+    let popup_width = if app.last_timed_out { 62 } else { 50 };
+    let popup = centred_rect(popup_width, 10, area);
+
     let (title, color, art) = if app.last_correct {
         ("Correct!", COL_CORRECT, ascii::CORRECT_ART)
+    } else if app.last_timed_out {
+        ("Time's up!", COL_WRONG, ascii::TIME_UP_ART)
     } else {
         ("Wrong", COL_WRONG, ascii::WRONG_ART)
     };
@@ -373,8 +449,9 @@ fn draw_answer_reveal(f: &mut Frame, app: &App, area: Rect) {
         .map(|q| q.correct_answer.as_str())
         .unwrap_or("");
 
-    let text = Text::from(vec![
-        Line::from(Span::styled(art, Style::default().fg(color))),
+    let mut art = draw_ascii_art(art, color);
+
+    art.extend([
         Line::from(""),
         Line::from(Span::styled(
             format!("Answer: {correct}"),
@@ -384,7 +461,21 @@ fn draw_answer_reveal(f: &mut Frame, app: &App, area: Rect) {
             format!("Score: {}", app.score),
             Style::default().fg(COL_ACCENT),
         )),
+        Line::from(if app.last_correct && app.time_bonus > 0 {
+            Span::styled(
+                format!("+{} time bonus", app.time_bonus),
+                Style::default().fg(COL_CORRECT),
+            )
+        } else if app.last_correct && app.bank_deposit == 0 {
+            Span::styled(
+                format!("+{}s to time bank", app.bank_deposit),
+                Style::default().fg(COL_ACCENT),
+            )
+        } else {
+            Span::raw("")
+        }),
     ]);
+    let text = Text::from(art);
 
     f.render_widget(Clear, popup);
     f.render_widget(
@@ -412,14 +503,32 @@ fn draw_name_input(f: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .margin(2)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(if app.earned_high_score { 12 } else { 2 }),
             Constraint::Length(3),
             Constraint::Length(2),
         ])
         .split(inner);
 
+    let prompt = if app.earned_high_score {
+        let mut trophy_art = draw_ascii_art(ascii::TROPHY_ART, COL_ACCENT);
+        
+        trophy_art.push(Line::from(""));
+        trophy_art.push(Line::from(Span::styled(
+            "You've earned a high score! Enter your initials for the board",
+            Style::default().fg(COL_DIM),
+        )));
+        Text::from(trophy_art)
+    } else {
+        Text::from(vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Up to 3 letters for the high score board",
+                Style::default().fg(COL_DIM),
+            )),
+        ])
+    };
     f.render_widget(
-        Paragraph::new("Up to 3 letters for the high score board")
+        Paragraph::new(prompt)
             .alignment(Alignment::Center)
             .style(Style::default().fg(COL_DIM)),
         chunks[0],
@@ -449,6 +558,24 @@ fn draw_game_over(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+
+    let game_over_art = draw_ascii_art(ascii::GAME_OVER_ART, COL_WRONG);
+    let art_height = game_over_art.len() as u16;
+    let art_width = game_over_art
+        .iter()
+        .map(|line| line.to_string().len())
+        .max()
+        .unwrap_or(0) as u16;
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(art_height), Constraint::Min(1)])
+        .split(inner);
+
+    let art_area = centred_rect(art_width, art_height, chunks[0]);
+    let game_over_art = draw_ascii_art(ascii::GAME_OVER_ART, COL_WRONG);
+    f.render_widget(Paragraph::new(Text::from(game_over_art)), art_area);
+
     let text = Text::from(vec![
         Line::from(""),
         Line::from(Span::styled(
@@ -464,12 +591,35 @@ fn draw_game_over(f: &mut Frame, app: &App, area: Rect) {
             "r — play again   h — high scores   q — menu",
             Style::default().fg(COL_DIM),
         )),
+        Line::from(if let Some(error) = &app.saved_scores_error {
+            Span::styled(
+                format!("Error saving scores: {error}"),
+                Style::default().fg(COL_WRONG),
+            )
+        } else {
+            Span::raw("")
+        }),
     ]);
 
-    f.render_widget(
-        Paragraph::new(text).alignment(Alignment::Center),
-        inner,
-    );
+    f.render_widget(Paragraph::new(text).alignment(Alignment::Center), chunks[1]);
+}
+
+fn high_score_row(i: usize, s: &crate::scores::HighScore) -> Row<'_> {
+    let style = match i {
+        0 => Style::default()
+            .fg(COL_CORRECT)
+            .add_modifier(Modifier::BOLD),
+        1 => Style::default().fg(COL_HIGHLIGHT),
+        2 => Style::default().fg(COL_ACCENT),
+        _ => Style::default().fg(COL_DIM),
+    };
+    Row::new(vec![
+        Cell::from(format!("{}", i + 1)),
+        Cell::from(s.initials.clone()),
+        Cell::from(format!("{}", s.score)),
+        Cell::from(s.date.clone()),
+    ])
+    .style(style)
 }
 
 fn draw_high_scores(f: &mut Frame, app: &App, area: Rect) {
@@ -477,35 +627,87 @@ fn draw_high_scores(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let rows: Vec<Row> = if app.scores.is_empty() {
-        vec![Row::new(vec![Cell::from("No scores yet — play a game!")])]
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(if app.score > 0 { 2 } else { 0 }),
+            Constraint::Min(1),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+
+    if app.score > 0 {
+        let your_score = Paragraph::new(format!("Last game score: {}", app.score))
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD));
+        f.render_widget(your_score, chunks[0]);
+    }
+
+    if app.scores.is_empty() {
+        let empty = Paragraph::new("No scores yet — play a game!")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(COL_DIM));
+        f.render_widget(empty, chunks[1]);
     } else {
-        app.scores
+        let rows: Vec<Row> = app
+            .scores
             .iter()
             .enumerate()
-            .map(|(i, s)| {
-                Row::new(vec![
-                    Cell::from(format!("{}", i + 1)),
-                    Cell::from(s.initials.clone()),
-                    Cell::from(format!("{}", s.score)),
-                    Cell::from(s.date.clone()),
-                ])
-            })
-            .collect()
-    };
+            .map(|(i, s)| high_score_row(i, s))
+            .collect();
+        let table_area = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Fill(1),
+                Constraint::Length(36),
+                Constraint::Fill(1),
+            ])
+            .split(chunks[1]);
 
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(4),
-            Constraint::Length(8),
-            Constraint::Length(8),
-            Constraint::Min(10),
-        ],
-    )
-    .header(Row::new(vec!["#", "Name", "Score", "Date"]).style(
-        Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD),
-    ));
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(4),
+                Constraint::Length(8),
+                Constraint::Length(8),
+                Constraint::Min(10),
+            ],
+        )
+        .header(
+            Row::new(vec!["#", "Name", "Score", "Date"])
+                .style(Style::default().fg(COL_ACCENT).add_modifier(Modifier::BOLD)),
+        );
 
-    f.render_widget(table, inner);
+        f.render_widget(table, table_area[1]);
+    }
+
+    f.render_widget(
+        Paragraph::new(hint_line(&[
+            ("Esc", "Menu"),
+            ("q", "Menu"),
+            ("Enter", "Menu"),
+        ]))
+        .alignment(Alignment::Center),
+        chunks[2],
+    );
+}
+
+fn draw_ascii_art(art: &str, color: Color) -> Vec<Line<'_>> {
+    let art = art.trim_matches('\n');
+    let art_width = art
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    let lines: Vec<Line> = art
+        .lines()
+        .map(|line| {
+            Line::from(Span::styled(
+                format!("{line:<art_width$}"),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ))
+        })
+        .collect();
+    lines
 }

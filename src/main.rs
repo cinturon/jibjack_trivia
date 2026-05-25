@@ -17,6 +17,8 @@ use app::App;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    load_env_files();
+
     // Setup terminal
     
     let mut terminal: Terminal<CrosstermBackend<Stdout>> = setup().await?;
@@ -27,11 +29,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     result
 }
 
+fn load_env_files() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    dotenvy::from_path(manifest_dir.join(".env")).ok();
+    dotenvy::from_path(manifest_dir.join("src/.env")).ok();
+}
+
 async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<(), Box<dyn std::error::Error>> {  
     let mut app = App::new();
 
     loop{
-        terminal.draw(|frame| ui::render(frame, &app))?;
+        terminal.draw(|frame| ui::render(frame, &mut app))?;
 
         // Process input
         if event::poll(Duration::from_millis(50))?
