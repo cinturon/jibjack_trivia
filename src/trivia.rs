@@ -63,6 +63,42 @@ impl TriviaSource {
         ]
     }
 }
+
+pub fn validate_source_config(source: TriviaSource) -> Result<(), String> {
+    validate_source_config_with(source, |key| std::env::var(key).ok())
+}
+
+fn validate_source_config_with(
+    source: TriviaSource,
+    get_env: impl Fn(&str) -> Option<String>,
+) -> Result<(), String> {
+    let Some((provider, key_name)) = required_api_key(source) else {
+        return Ok(());
+    };
+
+    let Some(key) = get_env(key_name) else {
+        return Err(format!(
+            "{key_name} is required to use {provider} questions. Set it in .env or export it before running."
+        ));
+    };
+
+    if key.trim().is_empty() {
+        return Err(format!(
+            "{key_name} is set but empty. Add a valid key to use {provider} questions."
+        ));
+    }
+
+    Ok(())
+}
+
+fn required_api_key(source: TriviaSource) -> Option<(&'static str, &'static str)> {
+    match source {
+        TriviaSource::OpenTriviaDB => None,
+        TriviaSource::OpenAI => Some(("OpenAI", "OPENAI_API_KEY")),
+        TriviaSource::Anthropic => Some(("Anthropic", "ANTHROPIC_API_KEY")),
+    }
+}
+
 impl Difficulty {
     /// Returns the string representation of the difficulty
     pub fn as_str(&self) -> &str {
@@ -577,5 +613,42 @@ mod tests {
         assert_eq!(parsed.response_code, 0);
         assert_eq!(parsed.results.len(), 1);
         assert_eq!(parsed.results[0].correct_answer, "Central Processing Unit");
+    }
+
+    #[test]
+    fn opentdb_source_does_not_require_api_key() {
+        let result = validate_source_config_with(TriviaSource::OpenTriviaDB, |_| None);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn openai_source_requires_openai_api_key() {
+        let result = validate_source_config_with(TriviaSource::OpenAI, |_| None);
+
+        assert_eq!(
+            result.unwrap_err(),
+            "OPENAI_API_KEY is required to use OpenAI questions. Set it in .env or export it before running."
+        );
+    }
+
+    #[test]
+    fn anthropic_source_requires_anthropic_api_key() {
+        let result = validate_source_config_with(TriviaSource::Anthropic, |_| None);
+
+        assert_eq!(
+            result.unwrap_err(),
+            "ANTHROPIC_API_KEY is required to use Anthropic questions. Set it in .env or export it before running."
+        );
+    }
+
+    #[test]
+    fn ai_source_rejects_empty_api_key() {
+        let result = validate_source_config_with(TriviaSource::OpenAI, |_| Some("   ".to_string()));
+
+        assert_eq!(
+            result.unwrap_err(),
+            "OPENAI_API_KEY is set but empty. Add a valid key to use OpenAI questions."
+        );
     }
 }

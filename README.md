@@ -1,12 +1,15 @@
 # jibjack_trivia
 
-A terminal trivia game written in Rust. Pick a category and difficulty, answer 10 multiple-choice questions from [Open Trivia Database](https://opentdb.com/), and compete for a spot on the local high score board.
+A terminal trivia game written in Rust. Pick a category and difficulty, answer 10 multiple-choice questions from [Open Trivia Database](https://opentdb.com/), or from an AI and compete for a spot on the local high score board.
 
 ## Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain via `rustup`)
-- Internet access (questions are fetched from OpenTDB at game start)
+- Internet access (questions are fetched when a game starts)
 - A terminal that supports ANSI colors (macOS Terminal, iTerm2, Windows Terminal, etc.)
+- Optional API keys for AI question sources:
+  - `OPENAI_API_KEY` for OpenAI
+  - `ANTHROPIC_API_KEY` for Anthropic
 
 ## Build and run
 
@@ -20,15 +23,40 @@ cargo run
 cargo run --release
 ```
 
+## AI source setup
+
+Open Trivia DB does not require an API key. To use the OpenAI or Anthropic question sources, create environment variables before running the game.
+
+You can create a local `.env` file in the project root:
+
+```env
+OPENAI_API_KEY=your-openai-key
+ANTHROPIC_API_KEY=your-anthropic-key
+```
+
+Or export them from your shell, for example in `~/.zshrc`:
+
+```zsh
+export OPENAI_API_KEY="your-openai-key"
+export ANTHROPIC_API_KEY="your-anthropic-key"
+```
+
+After editing `~/.zshrc`, restart your terminal or run:
+
+```bash
+source ~/.zshrc
+```
+
 ## How to play
 
 1. **Splash** — press Enter to continue
 2. **Main menu** — choose **Play**, **High Scores**, or **Quit**
 3. **Category** — pick from 25 OpenTDB categories (scrollable list)
 4. **Difficulty** — Easy, Medium, or Hard
-5. **Game** — answer 10 questions before time runs out
-6. **Name entry** — enter up to 3 initials for the high score table
-7. **Game over** — play again or return to the menu
+5. **Question source** — choose Open Trivia DB, OpenAI, or Anthropic
+6. **Game** — answer 10 questions before time runs out
+7. **Name entry** — enter up to 3 initials for the high score table
+8. **Game over** — play again or return to the menu
 
 ## Scoring
 
@@ -76,7 +104,7 @@ The top 10 scores are kept, sorted by score (highest first).
 
 ## Question source
 
-Questions are fetched from the [Open Trivia Database API](https://opentdb.com/api_config.php). No API key is required.
+Questions can come from [Open Trivia Database](https://opentdb.com/api_config.php), OpenAI, or Anthropic. OpenTDB works without credentials. OpenAI and Anthropic require the environment variables listed in [AI source setup](#ai-source-setup).
 
 ## Project layout
 
@@ -92,4 +120,4 @@ src/
 
 ## License
 
-Add your license here if applicable.
+This project is licensed under the [MIT License](LICENSE).
