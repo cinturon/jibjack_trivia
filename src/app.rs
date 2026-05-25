@@ -1,5 +1,8 @@
 use crate::scores::{add_high_score, load_high_scores, is_high_score, HighScore};
-use crate::trivia::{Category, Difficulty, Question, TriviaSource, fetch_questions_from_opentdb};
+use crate::trivia::{
+    Category, Difficulty, Question, TriviaSource, fetch_questions_from_openai,
+    fetch_questions_from_opentdb, fetch_questions_from_anthropic,
+};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 use std::error::Error;
@@ -129,9 +132,16 @@ impl App {
 
         let category = self.category;
         let difficulty = self.difficulty;
+        let question_source = self.question_source;
 
         tokio::spawn(async move {
-            let result = fetch_questions_from_opentdb(category, difficulty, 10).await;
+            let result = match question_source {
+                TriviaSource::OpenTriviaDB => {
+                    fetch_questions_from_opentdb(category, difficulty, 10).await
+                }
+                TriviaSource::OpenAI => fetch_questions_from_openai(category, difficulty, 10).await,
+                TriviaSource::Anthropic => fetch_questions_from_anthropic(category, difficulty, 10).await,
+            };
             let _ = tx.send(result);
         });
     }

@@ -29,3 +29,6 @@ dirs = "5"
 # chrono - for time related functionality
 chrono = "0.4.44"
 html-escape = "0.2.13"
+async-openai = { version = "0.40.2", features = ["responses"] }
+anthropic-sdk-rust = "0.1.1"
+dotenvy = "0.15.7"
