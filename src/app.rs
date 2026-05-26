@@ -11,8 +11,6 @@ use crate::ascii;
 
 const MS_PER_TICK: u64 = 50;
 const MENU_ITEMS: &[&str] = &["Play", "High Scores", "Quit"];
-/// Max seconds that can be stored in the bonus time bank between questions.
-const BONUS_BANK_CAP: u64 = 60;
 
 fn secs_to_ticks(secs: u64) -> u64 {
     secs * 1000 / MS_PER_TICK
@@ -61,12 +59,8 @@ pub struct App {
     pub answered: bool,
     pub last_correct: bool,
     pub question_time: u64,
-    /// Bonus points earned on the last correct answer (for answer-reveal UI).
-    pub time_bonus: u32,
-    /// Seconds banked from fast answers; extends the clock after the per-question limit.
-    pub bonus_bank_secs: u64,
-    /// Seconds added to the bank on the last correct answer (for answer-reveal UI).
-    pub bank_deposit: u64,
+    pub score_multiplier: u32,
+    pub last_multiplier_gain: u32,
     pub reveal_time: u64,
     pub questions_rx: Option<oneshot::Receiver<Result<Vec<Question>, String>>>,
     pub loading_error: Option<String>,
@@ -108,9 +102,8 @@ impl App {
             answered: false,
             last_correct: false,
             question_time: 0,
-            time_bonus: 0,
-            bonus_bank_secs: 0,
-            bank_deposit: 0,
+            score_multiplier: 0,
+            last_multiplier_gain: 0,
             reveal_time: 0,
             questions_rx: None,
             loading_error: None,
@@ -396,13 +389,11 @@ impl App {
         // Increment the question time by 50ms or 1 tick
         self.question_time += 1;
         let limit_ticks = secs_to_ticks(self.difficulty.time_limit_secs());
-        let max_ticks = limit_ticks + secs_to_ticks(self.bonus_bank_secs);
-        if self.question_time >= max_ticks {
-            self.commit_bank_usage();
+        if self.question_time >= limit_ticks {
             self.answered = true;
             self.last_correct = false;
-            self.time_bonus = 0;
-            self.bank_deposit = 0;
+            self.score_multiplier = 0;
+            self.last_multiplier_gain = 0;
             self.reveal_time = 0;
             self.last_timed_out = true;
             self.screen = Screen::AnswerReveal;
@@ -416,42 +407,15 @@ impl App {
         }
     }
 
-    /// Seconds left on the per-question countdown (not including the bank).
     pub fn secs_remaining(&self) -> u64 {
         let limit = self.difficulty.time_limit_secs();
         let elapsed = ticks_to_secs(self.question_time);
         limit.saturating_sub(elapsed)
     }
 
-    /// Seconds still available from the bonus bank on this question.
-    pub fn bank_secs_remaining(&self) -> u64 {
-        let limit_ticks = secs_to_ticks(self.difficulty.time_limit_secs());
-        if self.question_time <= limit_ticks {
-            return self.bonus_bank_secs;
-        }
-        let bank_used = ticks_to_secs(self.question_time - limit_ticks);
-        self.bonus_bank_secs.saturating_sub(bank_used)
-    }
-
-    /// Combined time left (question clock + bank).
-    pub fn total_secs_remaining(&self) -> u64 {
-        self.secs_remaining() + self.bank_secs_remaining()
-    }
-
-    fn commit_bank_usage(&mut self) {
-        let limit_ticks = secs_to_ticks(self.difficulty.time_limit_secs());
-        let bank_used = ticks_to_secs(self.question_time.saturating_sub(limit_ticks));
-        self.bonus_bank_secs = self.bonus_bank_secs.saturating_sub(bank_used);
-    }
-
-    fn deposit_into_bank(&mut self, secs: u64) {
-        if secs == 0 {
-            self.bank_deposit = 0;
-            return;
-        }
-        let deposit = secs / 2;
-        self.bank_deposit = deposit;
-        self.bonus_bank_secs = (self.bonus_bank_secs + deposit).min(BONUS_BANK_CAP);
+    fn multiplier_gain(&self) -> u32 {
+        let elapsed = ticks_to_secs(self.question_time);
+        10_u64.saturating_sub(elapsed) as u32
     }
 
     fn submit_answer(&mut self) {
@@ -463,18 +427,15 @@ impl App {
         self.answered = true;
         self.last_correct = self.option_cursor == question.correct_answer_index();
 
-        self.commit_bank_usage();
         if self.last_correct {
-            // Base points for difficulty + 1 point per second still on the question clock
             let base = self.difficulty.points_value();
-            let bonus = self.secs_remaining() as u32;
-            self.time_bonus = bonus;
-            self.score += base + bonus;
+            self.last_multiplier_gain = self.multiplier_gain();
+            self.score_multiplier += self.last_multiplier_gain;
+            self.score += base + self.score_multiplier;
             self.correct_count += 1;
-            self.deposit_into_bank(self.secs_remaining());
         } else {
-            self.time_bonus = 0;
-            self.bank_deposit = 0;
+            self.score_multiplier = 0;
+            self.last_multiplier_gain = 0;
         }
 
         self.reveal_time = 0;
@@ -518,8 +479,8 @@ impl App {
                     self.answered = false;
                     self.last_correct = false;
                     self.question_time = 0;
-                    self.bonus_bank_secs = 0;
-                    self.bank_deposit = 0;
+                    self.score_multiplier = 0;
+                    self.last_multiplier_gain = 0;
                     self.reveal_time = 0;
                     self.questions_rx = None;
                 }
@@ -536,5 +497,93 @@ impl App {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trivia::QuestionType;
+
+    fn test_question() -> Question {
+        Question::new(
+            QuestionType::MultipleChoice,
+            Category::all()[0],
+            Difficulty::Easy,
+            "Question?".to_string(),
+            vec![
+                "Correct".to_string(),
+                "Wrong 1".to_string(),
+                "Wrong 2".to_string(),
+                "Wrong 3".to_string(),
+            ],
+            "Correct".to_string(),
+        )
+    }
+
+    fn playing_app() -> App {
+        let mut app = App::new();
+        app.difficulty = Difficulty::Easy;
+        app.current_question = Some(test_question());
+        app.screen = Screen::Playing;
+        app
+    }
+
+    #[test]
+    fn correct_answer_adds_speed_to_multiplier_and_scores_base_plus_multiplier() {
+        let mut app = playing_app();
+        app.question_time = secs_to_ticks(3);
+
+        app.submit_answer();
+
+        assert!(app.last_correct);
+        assert_eq!(app.last_multiplier_gain, 7);
+        assert_eq!(app.score_multiplier, 7);
+        assert_eq!(app.score, 107);
+    }
+
+    #[test]
+    fn correct_answers_accumulate_multiplier() {
+        let mut app = playing_app();
+        app.question_time = secs_to_ticks(3);
+        app.submit_answer();
+
+        app.answered = false;
+        app.current_question = Some(test_question());
+        app.question_time = secs_to_ticks(4);
+        app.submit_answer();
+
+        assert_eq!(app.last_multiplier_gain, 6);
+        assert_eq!(app.score_multiplier, 13);
+        assert_eq!(app.score, 220);
+    }
+
+    #[test]
+    fn wrong_answer_resets_multiplier_without_changing_score() {
+        let mut app = playing_app();
+        app.score = 107;
+        app.score_multiplier = 7;
+        app.option_cursor = 1;
+
+        app.submit_answer();
+
+        assert!(!app.last_correct);
+        assert_eq!(app.score_multiplier, 0);
+        assert_eq!(app.last_multiplier_gain, 0);
+        assert_eq!(app.score, 107);
+    }
+
+    #[test]
+    fn timeout_resets_multiplier() {
+        let mut app = playing_app();
+        app.score_multiplier = 7;
+        app.question_time = secs_to_ticks(app.difficulty.time_limit_secs()) - 1;
+
+        app.handle_playing_tick();
+
+        assert!(!app.last_correct);
+        assert!(app.last_timed_out);
+        assert_eq!(app.score_multiplier, 0);
+        assert_eq!(app.last_multiplier_gain, 0);
     }
 }

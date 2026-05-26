@@ -23,6 +23,26 @@ cargo run
 cargo run --release
 ```
 
+## Build a binary
+
+To create an optimized standalone binary:
+
+```bash
+cargo build --release
+```
+
+Cargo writes the binary to:
+
+```bash
+target/release/jibjack_trivia
+```
+
+Run it directly with:
+
+```bash
+./target/release/jibjack_trivia
+```
+
 ## AI source setup
 
 Open Trivia DB does not require an API key. To use the OpenAI or Anthropic question sources, create environment variables before running the game.
@@ -62,12 +82,13 @@ source ~/.zshrc
 
 | Difficulty | Time per question | Base points |
 |------------|-------------------|-------------|
-| Easy       | 20s               | 100         |
-| Medium     | 15s               | 200         |
-| Hard       | 10s               | 300         |
+| Easy       | 10s               | 100         |
+| Medium     | 5s                | 200         |
+| Hard       | 3s                | 300         |
 
-- **Time bonus:** +1 point per second left on the question clock when you answer correctly
-- **Time bank:** half of your remaining question time is banked (up to 60s) and extends later questions if the per-question timer expires
+- **Score multiplier:** when you answer correctly, elapsed seconds are subtracted from 10 and that value is added to your multiplier.
+- **Correct answer score:** base points + your current multiplier.
+- **Wrong answers and timeouts:** reset the multiplier to 0.
 
 ## Controls
 
