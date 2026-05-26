@@ -329,26 +329,15 @@ fn draw_loading(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn time_fraction_remaining(app: &App) -> f64 {
-    let limit_secs = app.difficulty.time_limit_secs() + app.bonus_bank_secs;
+    let limit_secs = app.difficulty.time_limit_secs();
     if limit_secs == 0 {
         return 0.0;
     }
-    (app.total_secs_remaining() as f64 / limit_secs as f64).clamp(0.0, 1.0)
+    (app.secs_remaining() as f64 / limit_secs as f64).clamp(0.0, 1.0)
 }
 
 fn time_gauge_label(app: &App) -> String {
-    let bank = app.bank_secs_remaining();
-    if app.secs_remaining() > 0 {
-        if bank > 0 {
-            format!("{}s (+{bank}s bank)", app.secs_remaining())
-        } else {
-            format!("{}s left", app.secs_remaining())
-        }
-    } else if bank > 0 {
-        format!("{bank}s bank")
-    } else {
-        "0s".to_string()
-    }
+    format!("{}s left", app.secs_remaining())
 }
 
 fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
@@ -369,8 +358,9 @@ fn draw_playing(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     let header = Paragraph::new(format!(
-        "Score: {}  |  Q {}/{}",
+        "Score: {}  |  Multiplier: {}  |  Q {}/{}",
         app.score,
+        app.score_multiplier,
         app.current_q + 1,
         app.questions.len().max(1)
     ))
@@ -461,18 +451,16 @@ fn draw_answer_reveal(f: &mut Frame, app: &App, area: Rect) {
             format!("Score: {}", app.score),
             Style::default().fg(COL_ACCENT),
         )),
-        Line::from(if app.last_correct && app.time_bonus > 0 {
+        Line::from(if app.last_correct {
             Span::styled(
-                format!("+{} time bonus", app.time_bonus),
+                format!(
+                    "+{} multiplier (multiplier: {})",
+                    app.last_multiplier_gain, app.score_multiplier
+                ),
                 Style::default().fg(COL_CORRECT),
             )
-        } else if app.last_correct && app.bank_deposit == 0 {
-            Span::styled(
-                format!("+{}s to time bank", app.bank_deposit),
-                Style::default().fg(COL_ACCENT),
-            )
         } else {
-            Span::raw("")
+            Span::styled("Multiplier reset to 0", Style::default().fg(COL_WRONG))
         }),
     ]);
     let text = Text::from(art);
