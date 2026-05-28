@@ -4,8 +4,13 @@ use html_escape::decode_html_entities;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fmt::Display;
+use std::fs::{File, create_dir_all};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 
+
+const QUESTIONS_TO_KEEP: usize = 500;
 const OPENTRIVIADB_API_URL: &str = "https://opentdb.com/api.php";
 
 const OPENAI_MODEL: &str = "gpt-4o-mini";
@@ -433,10 +438,14 @@ pub async fn fetch_questions_from_openai(
     count: u32,
 ) -> Result<Vec<Question>, String> {
     let client = Client::new();
+    let all_questions = load_questions_from_file()?;
+    let dont_repeat_questions = all_questions.join(",");
+
     let prompt = format!(
-        "{PROMPT}\nGenerate {count} questions for category \"{}\" at {} difficulty.",
+        "{PROMPT}\nGenerate {count} questions for category \"{}\" at {} difficulty. Do not repeat questions that have already been asked: {}",
         category.name,
-        difficulty.as_str()
+        difficulty.as_str(),
+        dont_repeat_questions
     );
     let request = CreateResponseArgs::default()
         .model(OPENAI_MODEL)
@@ -463,11 +472,15 @@ pub async fn fetch_questions_from_openai(
         ));
     }
 
-    Ok(trivia_db_response
+    let questions: Vec<Question> = trivia_db_response
         .results
         .into_iter()
         .map(Question::from)
-        .collect())
+        .collect();
+
+    save_questions_to_file(&questions, questions.len())?;
+
+    Ok(questions)
 }
 
 pub async fn fetch_questions_from_anthropic(
@@ -478,10 +491,15 @@ pub async fn fetch_questions_from_anthropic(
     let client =
         Anthropic::from_env().map_err(|e| format!("Failed to create Anthropic client: {e}"))?;
 
+    let all_questions = load_questions_from_file()?;
+
+    let dont_repeat_questions = all_questions.join(",");
+
     let prompt = format!(
-        "{PROMPT}\nGenerate {count} questions for category \"{}\" at {} difficulty.",
+        "{PROMPT}\nGenerate {count} questions for category \"{}\" at {} difficulty. Do not repeat questions that have already been asked: {}",
         category.name,
-        difficulty.as_str()
+        difficulty.as_str(),
+        dont_repeat_questions
     );
 
     let response = client
@@ -517,11 +535,15 @@ pub async fn fetch_questions_from_anthropic(
         ));
     }
 
-    Ok(trivia_db_response
+    let questions: Vec<Question> = trivia_db_response
         .results
         .into_iter()
         .map(Question::from)
-        .collect())
+        .collect();
+
+    save_questions_to_file(&questions, questions.len())?;
+
+    Ok(questions)
 }
 
 fn parse_ai_questions_body(body: &str, provider: &str) -> Result<OpenTDBResponse, String> {
@@ -573,6 +595,58 @@ fn extract_json_object(body: &str) -> Option<&str> {
     }
 
     None
+}
+
+pub fn save_questions_to_file(questions: &[Question], question_count: usize) -> Result<(), String> {
+    let home_dir = dirs::home_dir().ok_or_else(|| "Home directory not found".to_string())?;
+
+    let dir = home_dir.join(".jibjack_trivia");
+
+    if !dir.exists() {
+        create_dir_all(&dir).map_err(|e| format!("Failed to create directory: {e}"))?;
+    }
+
+    let file_path = dir.join("questions.txt");
+
+    let mut all_questions: BTreeSet<String> = load_questions_from_file()?.into_iter().collect();
+
+    if all_questions.len() >= QUESTIONS_TO_KEEP {
+        let questions_to_remove: Vec<String> = all_questions.iter().take(question_count).cloned().collect();
+
+        for question in questions_to_remove {
+            all_questions.remove(&question);
+        }
+    }
+
+    all_questions.extend(questions.iter().map(|question| question.question.clone()));
+
+    let file = File::create(&file_path).map_err(|e| format!("Failed to open file: {e}"))?;
+
+    let mut writer = BufWriter::new(file);
+    for question in all_questions {
+        writeln!(writer, "{question}").map_err(|e| format!("Failed to write question: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn load_questions_from_file() -> Result<Vec<String>, String> {
+    let home_dir = dirs::home_dir().ok_or_else(|| "Home directory not found".to_string())?;
+
+    let dir = home_dir.join(".jibjack_trivia");
+    if !dir.exists() {
+        create_dir_all(&dir).map_err(|e| format!("Failed to create directory: {e}"))?;
+    }
+    let file_path = dir.join("questions.txt");
+    if !file_path.exists() {
+        File::create(&file_path).map_err(|e| format!("Failed to create file: {e}"))?;
+    }
+
+    let file = File::open(file_path).map_err(|e| format!("Failed to open file: {e}"))?;
+    let reader = BufReader::new(file);
+    reader
+        .lines()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read questions: {e}"))
 }
 
 /// Decodes HTML entities in a string
